@@ -1,0 +1,81 @@
+- hosts: [kubernetes]
+  remote_user: root
+  vars:
+    mysql_root: "Sup3rS3cureP@$$word!"
+  tasks:
+    - name: Disable SELinux
+      selinux:
+        state: disabled
+    - name: Open firewall
+      yum:
+        state: removed
+        name: firewalld
+    - name: Create a group of all hosts by app_type
+      group_by: key="kube"
+    - name: enable bridge networking
+      shell: modprobe br_netfilter && echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables
+    - name: enable kube repo
+      copy:
+        src: "kube.repo"
+        dest: /etc/yum.repos.d/kube.repo
+        mode: '0644'
+        owner: root
+        group: root
+    - name: refresh yum cache
+      shell: yum makecache fast
+    - name: install docker, kubeadm
+      yum:
+        name: ["docker", "kubeadm"]
+    - name: enable kubelet
+      systemd:
+        state: restarted
+        name: kubelet
+        enabled: yes
+    - name: enable docker
+      systemd:
+        state: restarted
+        name: docker
+        enabled: yes
+- hosts: [kubernetes-master]
+  remote_user: root
+  tasks:
+    - name: reset cluster
+      shell: kubeadm reset -f
+    - name: init kube cluster
+      shell: kubeadm init
+    - name: create kube home
+      file:
+        path: /root/.kube
+        state: directory
+        mode: '0700'
+    - name: copy kube admin config
+      copy:
+        src: /etc/kubernetes/admin.conf 
+        dest: /root/.kube/admin.conf
+        remote_src: yes
+        mode: '0700'
+        owner: root
+        group: root
+    - name: get kubectl status
+      shell: kubectl --kubeconfig ~/.kube/admin.conf get nodes
+      register: kubectl_get_nodes
+    - name: show node status
+      debug: msg={{ kubectl_get_nodes.stdout }}
+    - name: get join token
+      shell: kubeadm token list | awk 'NR == 2 {print $1}'
+      register: kube_join_token
+    - name: apply host networking
+      shell: export kubever=$(kubectl --kubeconfig ~/.kube/admin.conf version | base64 | tr -d '\n') && kubectl --kubeconfig ~/.kube/admin.conf apply -f "https://cloud.weave.works/k8s/net?k8s-version=$kubever"
+- hosts: [kubernetes-slave]
+  remote_user: root
+  tasks:
+    - name: join kube cluster
+      shell: kubeadm join --token {{ hostvars['kube-master.alex']['kube_join_token'].stdout }} --discovery-token-unsafe-skip-ca-verification kube-master.alex:6443
+- hosts: [kubernetes-master]
+  remote_user: root
+  tasks: 
+    - name: get cluster status
+      shell: kubectl --kubeconfig ~/.kube/admin.conf get nodes
+      register: cluster_status
+    - name: show cluster status
+      debug: msg={{ cluster_status }}

@@ -1,0 +1,33 @@
+# setup box
+- hosts: all
+  remote_user: root
+  # timezone
+  tasks:  
+    - name: Allow 'wheel' group to have passwordless sudo
+      lineinfile:
+        dest: /etc/sudoers
+        state: present
+        regexp: '^%wheel'
+        line: '%wheel ALL=(ALL) NOPASSWD: ALL'
+        validate: 'visudo -cf %s'
+    - name: Set timezone to UTC
+      timezone:
+        name: America/Chicago
+    - name: packages
+      yum:
+        name: "{{ packages }}"
+      vars:
+        packages:
+        - wget
+        - bash
+        - epel-release
+        - curl
+        - python3
+        - python3-pip
+    - name: more packages
+      yum:
+        name: "{{ packages2 }}"
+      vars:
+        packages2:
+        - jq
+    

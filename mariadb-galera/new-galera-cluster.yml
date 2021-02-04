@@ -1,0 +1,79 @@
+- hosts: [database]
+  remote_user: root
+  vars:
+    mysql_root: "Sup3rS3cur3P@$$w0rd!"
+  tasks:
+    - name: Disable SELinux
+      selinux:
+        state: disabled
+    - name: Open firewall
+      yum:
+        state: removed
+        name: firewalld
+    - name: Create a group of all hosts by app_type
+      group_by: key="db"
+    - name: enable mariadb 
+      copy:
+        src: "mariadb.repo"
+        dest: /etc/yum.repos.d/mariadb.repo
+        mode: '0644'
+        owner: root
+        group: root
+    - name: update repo cache
+      shell: yum makecache --disablerepo='*' --enablerepo='mariadb'
+    - name: install mariadb
+      yum:
+        name: "{{ packages }}"
+      vars:
+        packages:
+          - MariaDB-server
+          - MariaDB-client
+          - rsync 
+          - policycoreutils-python
+    - name: start & enable mariadb-server
+      systemd:
+        state: started
+        name: mariadb
+        enabled: yes
+    - name: set mariadb root password
+      shell: mysql -uroot -e "set password = password('{{ mysql_root }}');"
+    - name: create mariadb.conf.d dir
+      file:
+        path: /etc/my.cnf.d/
+        state: directory
+        mode: '0755'
+    - name: configure galera
+      template:
+        src: "galera.cnf"
+        dest: /etc/my.cnf.d/galera.cnf
+        mode: '0755'
+    - name: configure my.cnf
+      template:
+        src: "my.cnf"
+        dest: /etc/my.cnf
+    - name: stop mariadb-server
+      systemd:
+        state: stopped
+        name: mariadb
+    - name: galera_new_cluster
+      shell: galera_new_cluster
+      when: ansible_hostname == "db01"
+    - name: check cluster size
+      shell: mysql -u root -p{{mysql_root}} -e "SHOW STATUS LIKE 'wsrep_cluster_size'"
+      register: cluster_size
+      when: ansible_hostname == "db01"
+    - debug: msg="{{ cluster_size.stdout }}"
+      when: ansible_hostname == "db01"
+    - name: start db02
+      when: ansible_hostname == "db02"
+      systemd:
+        state: started
+        name: mariadb
+        enabled: yes
+    - name: start db03
+      when: ansible_hostname == "db03"
+      systemd:
+        state: started
+        name: mariadb
+        enabled: yes
+    
